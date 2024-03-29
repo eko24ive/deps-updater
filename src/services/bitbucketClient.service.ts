@@ -3,11 +3,16 @@ import FormData from 'form-data';
 
 const API_URL = 'https://api.bitbucket.org/2.0/';
 
-class BitbucketAPI {
+export default class BitbucketService {
   private http: AxiosInstance;
   public token: string;
 
-  constructor() {
+  constructor(token: string) {
+    if (!token || token.length === 0) {
+      throw new Error('Incorrect BitbucketAPI token provided');
+    }
+
+    this.token = token;
     this.http = axios.create({
       baseURL: API_URL,
     });
@@ -25,7 +30,7 @@ class BitbucketAPI {
     });
   }
 
-  async getRepositoryInfo(repositoryName: string) {
+  async getRepositoryInfo(repositoryName: string): Promise<Repository> {
     const request = await axios.get(
       'https://api.bitbucket.org/2.0/repositories/' + repositoryName,
     );
@@ -33,7 +38,11 @@ class BitbucketAPI {
     return request.data;
   }
 
-  async getFile(repositoryName: string, mainBranch: string, fileName: string) {
+  async getFile(
+    repositoryName: string,
+    mainBranch: string,
+    fileName: string,
+  ): Promise<string> {
     const request = await axios.get(
       `https://api.bitbucket.org/2.0/repositories/${repositoryName}/src/${mainBranch}/${fileName}`,
       { transformResponse: (r) => r },
@@ -66,11 +75,6 @@ class BitbucketAPI {
     );
 
     return request;
-    /*
-    curl --request POST \
-  --url 'https://api.bitbucket.org/2.0/repositories/{workspace}/{repo_slug}/src?message=Test&files' \
-  --header 'Authorization: Bearer <access_token>'
-   */
   }
 
   async createPullrequest(
@@ -78,7 +82,7 @@ class BitbucketAPI {
     sourceBranch: string,
     workspaceUUID: string,
     repositoryUUID: string,
-  ) {
+  ): Promise<CreatePullRequestResponse> {
     const data = {
       title: title,
       source: {
@@ -88,7 +92,7 @@ class BitbucketAPI {
       },
     };
 
-    const request = await this.http.post(
+    const request = await this.http.post<CreatePullRequestResponse>(
       `https://api.bitbucket.org/2.0/repositories/${workspaceUUID}/${repositoryUUID}/pullrequests`,
       data,
       {
@@ -98,8 +102,6 @@ class BitbucketAPI {
       },
     );
 
-    return request;
+    return request.data;
   }
 }
-
-export default new BitbucketAPI();

@@ -1,62 +1,91 @@
-import { confirm, input } from '@inquirer/prompts';
-import open from 'open';
+import { confirm } from '@inquirer/prompts';
+import { Command } from 'commander';
+import dotenv from 'dotenv';
 
-import BitbucketAPI from './bitbucket.api.js';
-import { createNewPackageFile } from './createNewPackageFile.js';
+import BitbucketClientService from './services/bitbucketClient.service.js';
+import InputValidationService from './services/inputValidation.service.js';
+import PackageFileSerivce from './services/packageFile.service.js';
+import PullRequestService from './services/pullRequest.service.js';
 
-const PACKAGE_FILE = 'package.json'
+dotenv.config();
+const PACKAGE_FILE_NAME = 'package.json';
+
+const program = new Command();
+
+program
+  .description('Split a string into substrings and display as an array')
+  .requiredOption(
+    '--package <string>',
+    'Package name and version (e.g. react@1.0.0',
+  )
+  .requiredOption(
+    '--repository <string>',
+    'Repository name (e.g. user/repository)',
+  )
+  .option('--token <string>', 'Bitbucket access token');
+
+program.parse(process.argv);
+
+// Introduce serivces to manage business logic
+// Npm package version validation
+// unit tests
+// add TS coverage (dtos..., etc)
 
 const run = async (): Promise<void> => {
-  const authorizeConsent = await confirm({
-    message: 'Would you like to open authorization link to bitbucket?',
-    default: false
-  });
+  const options: CommandOptions = program.opts();
 
-  if(authorizeConsent) {
-    open('https://bitbucket.org/site/oauth2/authorize?client_id=AGNZtJGWvxEjXV8SwV&response_type=token')
-  }
+  const bitbucketServiceToken =
+    options.token ?? process.env.BITBUCKET_API_TOKEN;
+  const bitbucketService = new BitbucketClientService(bitbucketServiceToken);
+  const inputValidationService = new InputValidationService();
+  const packageFileSerivce = new PackageFileSerivce();
 
-  const tokenInput = await input({ message: 'Enter access token', default:'FP1NHcULuhpPFbC44DO6N0TTopvDShhbFb8Q5BiymiJ9LQQR-vexnUV8mih6sRoUbSZiuRa_icJPywwnaFhc6AdrD1girs7syy3xUdgd5q56IVd7sAttfZ-PtmI0O1OW7pe-yvVZrYR6a6H6SRkMFBWGdkOR' });
-  BitbucketAPI.token = tokenInput
+  inputValidationService.validate(options);
 
-  const packageAndVersionInput = await input({ message: 'Enter package and version (e.g. react@1.0.0)', default: 'lodash@4.17.21' });
-  // https://registry.npmjs.org/lodash/4.17.21
+  const [packageName, packageVersion] = options.package.split('@');
 
-  if(!packageAndVersionInput.includes('@')) {
-    throw new Error("Invalid package and version format");
-  }
+  const repository = await bitbucketService.getRepositoryInfo(
+    options.repository,
+  );
 
-  const [packageName, packageVersion] = packageAndVersionInput.split('@')
+  const rawSourcePackageFile = await bitbucketService.getFile(
+    options.repository,
+    repository.mainbranch.name,
+    PACKAGE_FILE_NAME,
+  );
 
-
-  const repositoryName = await input({ message: 'Enter repository (e.g. USER/repository)', default: 'eko24ive/test-repo' });
-  if(!repositoryName.includes('/')) {
-    throw new Error("Invalid repository resource");
-  }
-  const repository = await BitbucketAPI.getRepositoryInfo(repositoryName)
-
-  const mainBranch = repository.mainbranch.name;
-  const workspaceUUID = repository.workspace.uuid
-  const repositoryUUID = repository.uuid
-
-  const packageFileContent = await BitbucketAPI.getFile(repositoryName, mainBranch, PACKAGE_FILE)
-
-
-  const newPackageFile = await createNewPackageFile(packageFileContent, packageName, packageVersion);
-
-  const changeTitle = `Updating ${packageName} to version ${packageVersion}`
-  const commitMessage = `chore: ${changeTitle}`
-  const branchName = `updatedeps/${packageName}-${packageVersion}`
-
-  await BitbucketAPI.commitFile(PACKAGE_FILE, newPackageFile, workspaceUUID, repositoryUUID, commitMessage, branchName)
+  packageFileSerivce.loadFile(rawSourcePackageFile);
+  packageFileSerivce.updateDependency(packageName, packageVersion);
 
   const createPRConsent = await confirm({
     message: 'Would you like to create a PR to update a dependancy?',
   });
 
-  if(createPRConsent) {
-    await BitbucketAPI.createPullrequest(changeTitle, branchName, workspaceUUID, repositoryUUID)
+  if (!createPRConsent) {
+    return;
   }
+
+  const pullRequestService = new PullRequestService(
+    packageFileSerivce,
+    bitbucketService,
+    packageName,
+    packageVersion,
+  );
+
+  const changeDescription = `Updating ${packageName} to version ${packageVersion}`;
+
+  await pullRequestService.commitFile(
+    `chore: ${changeDescription}`,
+    PACKAGE_FILE_NAME,
+    repository.workspace.uuid,
+    repository.uuid,
+  );
+
+  await pullRequestService.createPullRequest(
+    changeDescription,
+    repository.workspace.uuid,
+    repository.uuid
+  );
 };
 
 run();
