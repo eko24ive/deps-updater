@@ -58,13 +58,13 @@ export default class BitbucketService {
     repositoryUUID: string,
     commitMessage: string,
     newBranch: string,
-  ) {
+  ): Promise<void> {
     const data = new FormData();
     data.append(fileName, fileContent);
     data.append('message', commitMessage);
     data.append('branch', newBranch);
 
-    const request = await this.http.post(
+    await this.http.post(
       `https://api.bitbucket.org/2.0/repositories/${workspaceUUID}/${repositoryUUID}/src`,
       data,
       {
@@ -73,8 +73,6 @@ export default class BitbucketService {
         },
       },
     );
-
-    return request;
   }
 
   async createPullrequest(
